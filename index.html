@@ -151,66 +151,227 @@
     // 화면 고정 모드 전용 고정 깊이 (카메라 클리핑 방지 및 일관된 크기 보장)
     const PINNED_DEPTH_Z = -600;
 
-    // 2. 3D 입체 방패(Shield) 오브젝트 생성
+    // 2. 3D 입체 방패(Shield) 오브젝트 생성 (쉐도우가드 2줄 방패 로고 + 코어 글로우 + 다중 홀로그램 링)
+    function createShieldPath(scale = 1.0) {
+      const s = scale;
+      const path = new THREE.Shape();
+      // 상단 중앙 정점에서 좌우 어깨로 이어지는 방패 크레스트 곡선
+      path.moveTo(0, 0.38 * s);
+      path.quadraticCurveTo(0.14 * s, 0.35 * s, 0.29 * s, 0.26 * s);
+      // 우측 날개에서 하단 첨두로 수렴하는 곡선
+      path.bezierCurveTo(0.30 * s, 0.02 * s, 0.21 * s, -0.22 * s, 0, -0.39 * s);
+      // 하단 첨두에서 좌측 날개로 이어지는 대칭 곡선
+      path.bezierCurveTo(-0.21 * s, -0.22 * s, -0.30 * s, 0.02 * s, -0.29 * s, 0.26 * s);
+      path.quadraticCurveTo(-0.14 * s, 0.35 * s, 0, 0.38 * s);
+      path.closePath();
+      return path;
+    }
+
+    function createHoloRingTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+      const cx = 256, cy = 256;
+
+      // 외곽 대시 아크
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.78)';
+      ctx.lineWidth = 5;
+      ctx.setLineDash([28, 14, 8, 14]);
+      ctx.beginPath();
+      ctx.arc(cx, cy, 232, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // 내측 얇은 가이드 링
+      ctx.strokeStyle = 'rgba(125, 211, 252, 0.38)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([12, 20]);
+      ctx.beginPath();
+      ctx.arc(cx, cy, 210, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // 4방위 포인터 마커
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#38bdf8';
+      for (let i = 0; i < 4; i++) {
+        const angle = (i * Math.PI) / 2;
+        const x = cx + Math.cos(angle) * 232;
+        const y = cy + Math.sin(angle) * 232;
+        ctx.beginPath();
+        ctx.arc(x, y, 6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    function createCoreGlowTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 256;
+      const ctx = canvas.getContext('2d');
+      const grad = ctx.createRadialGradient(128, 128, 8, 128, 128, 120);
+      grad.addColorStop(0, 'rgba(56, 189, 248, 0.75)');
+      grad.addColorStop(0.45, 'rgba(2, 132, 199, 0.28)');
+      grad.addColorStop(1, 'rgba(2, 132, 199, 0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 256, 256);
+      return new THREE.CanvasTexture(canvas);
+    }
+
     function createShield3D() {
       const shieldGroup = new THREE.Group();
 
-      const shape = new THREE.Shape();
-      shape.moveTo(0, 0.36);
-      shape.lineTo(0.28, 0.25);
-      shape.quadraticCurveTo(0.29, -0.08, 0, -0.36);
-      shape.quadraticCurveTo(-0.29, -0.08, -0.28, 0.25);
-      shape.closePath();
+      // (A) 딥 아머 베이스 플레이트 (2줄 방패 사이의 어두운 그림자 깊이감 형성)
+      const baseShape = createShieldPath(0.96);
+      const baseGeo = new THREE.ExtrudeGeometry(baseShape, {
+        depth: 0.042,
+        bevelEnabled: true,
+        bevelSegments: 3,
+        steps: 1,
+        bevelSize: 0.01,
+        bevelThickness: 0.01
+      });
+      baseGeo.center();
+      const baseMat = new THREE.MeshStandardMaterial({
+        color: 0x061326,
+        metalness: 0.88,
+        roughness: 0.24,
+        emissive: 0x082f49,
+        emissiveIntensity: 0.25
+      });
+      shieldGroup.add(new THREE.Mesh(baseGeo, baseMat));
 
-      const extrudeSettings = {
-        depth: 0.06,
+      // (B) 쉐도우가드 1선 (외곽 방패 라인 - 중공 입체 림 구조)
+      const outerBandShape = createShieldPath(1.0);
+      outerBandShape.holes.push(createShieldPath(0.81));
+      const outerBandGeo = new THREE.ExtrudeGeometry(outerBandShape, {
+        depth: 0.068,
         bevelEnabled: true,
         bevelSegments: 4,
         steps: 1,
-        bevelSize: 0.018,
-        bevelThickness: 0.02
-      };
-
-      const outerGeo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-      outerGeo.center();
-
-      const outerMat = new THREE.MeshStandardMaterial({
-        color: 0x0f294a,
-        metalness: 0.78,
-        roughness: 0.22,
-        emissive: 0x0369a1,
-        emissiveIntensity: 0.35
+        bevelSize: 0.014,
+        bevelThickness: 0.016
       });
-      shieldGroup.add(new THREE.Mesh(outerGeo, outerMat));
+      outerBandGeo.center();
+      const outerBandMat = new THREE.MeshStandardMaterial({
+        color: 0x0c4a6e,
+        metalness: 0.82,
+        roughness: 0.18,
+        emissive: 0x0284c7,
+        emissiveIntensity: 0.45
+      });
+      const outerBandMesh = new THREE.Mesh(outerBandGeo, outerBandMat);
+      shieldGroup.add(outerBandMesh);
 
-      const innerMesh = new THREE.Mesh(
-        outerGeo,
-        new THREE.MeshStandardMaterial({
-          color: 0x0284c7,
-          metalness: 0.65,
-          roughness: 0.2,
-          emissive: 0x38bdf8,
-          emissiveIntensity: 0.45
+      // 외곽 1선 네온 엣지 하이라이트
+      const outerEdges = new THREE.EdgesGeometry(outerBandGeo, 24);
+      const outerEdgeMat = new THREE.LineBasicMaterial({
+        color: 0x38bdf8,
+        transparent: true,
+        opacity: 0.92
+      });
+      shieldGroup.add(new THREE.LineSegments(outerEdges, outerEdgeMat));
+
+      // (C) 쉐도우가드 2선 (내측 방패 라인 - 전면/후면으로 한 단계 더 돌출된 2중 입체 구조)
+      const innerBandShape = createShieldPath(0.67);
+      innerBandShape.holes.push(createShieldPath(0.47));
+      const innerBandGeo = new THREE.ExtrudeGeometry(innerBandShape, {
+        depth: 0.092,
+        bevelEnabled: true,
+        bevelSegments: 4,
+        steps: 1,
+        bevelSize: 0.012,
+        bevelThickness: 0.015
+      });
+      innerBandGeo.center();
+      const innerBandMat = new THREE.MeshStandardMaterial({
+        color: 0x0284c7,
+        metalness: 0.72,
+        roughness: 0.15,
+        emissive: 0x38bdf8,
+        emissiveIntensity: 0.58
+      });
+      const innerBandMesh = new THREE.Mesh(innerBandGeo, innerBandMat);
+      shieldGroup.add(innerBandMesh);
+
+      const innerEdges = new THREE.EdgesGeometry(innerBandGeo, 24);
+      const innerEdgeMat = new THREE.LineBasicMaterial({
+        color: 0xbae6fd,
+        transparent: true,
+        opacity: 0.95
+      });
+      shieldGroup.add(new THREE.LineSegments(innerEdges, innerEdgeMat));
+
+      // (D) 중앙 AI 보안 코어 크리스탈 (2선 방패 안쪽 중심부)
+      const coreShape = createShieldPath(0.29);
+      const coreGeo = new THREE.ExtrudeGeometry(coreShape, {
+        depth: 0.11,
+        bevelEnabled: true,
+        bevelSegments: 3,
+        steps: 1,
+        bevelSize: 0.012,
+        bevelThickness: 0.018
+      });
+      coreGeo.center();
+      const coreMat = new THREE.MeshStandardMaterial({
+        color: 0x38bdf8,
+        metalness: 0.55,
+        roughness: 0.12,
+        emissive: 0x7dd3fc,
+        emissiveIntensity: 0.75
+      });
+      const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+      shieldGroup.add(coreMesh);
+
+      // (E) 코어 에너지 글로우 후광 플레인
+      const glowPlane = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.82, 0.82),
+        new THREE.MeshBasicMaterial({
+          map: createCoreGlowTexture(),
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          side: THREE.DoubleSide
         })
       );
-      innerMesh.scale.set(0.72, 0.72, 1.25);
-      shieldGroup.add(innerMesh);
+      glowPlane.position.set(0, 0, -0.01);
+      shieldGroup.add(glowPlane);
 
-      const edges = new THREE.EdgesGeometry(outerGeo, 22);
-      const lineMat = new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.9 });
-      shieldGroup.add(new THREE.LineSegments(edges, lineMat));
-
-      const ringGeo = new THREE.RingGeometry(0.44, 0.465, 64);
-      const ringMat = new THREE.MeshBasicMaterial({
-        color: 0x38bdf8,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.55
-      });
-      const haloRing = new THREE.Mesh(ringGeo, ringMat);
+      // (F) 외곽 사이버네틱 HUD 홀로그램 링
+      const haloRing = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.96, 0.96),
+        new THREE.MeshBasicMaterial({
+          map: createHoloRingTexture(),
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          side: THREE.DoubleSide
+        })
+      );
       shieldGroup.add(haloRing);
 
-      return { shieldGroup, haloRing };
+      // (G) 3차원 경사 회전 오비탈 토러스 링 (입체 회전감 극대화)
+      const orbitalGeo = new THREE.TorusGeometry(0.42, 0.0045, 12, 96);
+      const orbitalMat = new THREE.MeshBasicMaterial({
+        color: 0x7dd3fc,
+        transparent: true,
+        opacity: 0.65
+      });
+      const orbitalRing = new THREE.Mesh(orbitalGeo, orbitalMat);
+      orbitalRing.rotation.x = Math.PI * 0.22;
+      orbitalRing.rotation.y = -Math.PI * 0.15;
+      shieldGroup.add(orbitalRing);
+
+      return {
+        shieldGroup,
+        haloRing,
+        orbitalRing,
+        coreMesh,
+        innerBandMat,
+        outerBandMat,
+        glowPlane
+      };
     }
 
     function createMiniBadge(text, colorHex) {
@@ -246,7 +407,15 @@
     rootGroup.scale.set(BASE_AR_SCALE, BASE_AR_SCALE, BASE_AR_SCALE);
     smoothGroup.add(rootGroup);
 
-    const { shieldGroup, haloRing } = createShield3D();
+    const {
+      shieldGroup,
+      haloRing,
+      orbitalRing,
+      coreMesh,
+      innerBandMat,
+      outerBandMat,
+      glowPlane
+    } = createShield3D();
     shieldGroup.position.set(0, 0, 0.12);
     rootGroup.add(shieldGroup);
 
@@ -444,10 +613,19 @@
           }
         }
 
-        // 3D 방패 회전 및 부유
+        // 3D 방패 회전, 코어 호흡 글로우 및 다중 홀로그램 링 모션
         shieldGroup.rotation.y += delta * 1.1;
-        shieldGroup.position.z = 0.14 + Math.sin(clock.elapsedTime * 2.5) * 0.025;
+        const impactBoost = Math.max(0, shockTimer);
+        shieldGroup.position.z = 0.14 + Math.sin(clock.elapsedTime * 2.5) * 0.025 - impactBoost * 0.018;
         haloRing.rotation.z -= delta * 0.6;
+        orbitalRing.rotation.z += delta * 1.4;
+        orbitalRing.rotation.x = Math.PI * 0.22 + Math.sin(clock.elapsedTime * 1.8) * 0.12;
+
+        const pulse = 0.5 + 0.5 * Math.sin(clock.elapsedTime * 3.5);
+        coreMesh.scale.setScalar(0.96 + pulse * 0.07 + impactBoost * 0.12);
+        glowPlane.scale.setScalar(0.95 + pulse * 0.1 + impactBoost * 0.22);
+        innerBandMat.emissiveIntensity = 0.55 + pulse * 0.2 + impactBoost * 0.65;
+        outerBandMat.emissiveIntensity = 0.42 + pulse * 0.12 + impactBoost * 0.45;
 
         // 충격파 확산
         if (shockTimer > 0) {
