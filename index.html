@@ -27,7 +27,7 @@
       background: rgba(16, 185, 129, 0.2); color: #34d399; border-color: rgba(52, 211, 153, 0.5);
     }
     #status-badge.pinned {
-      background: rgba(56, 189, 248, 0.22); color: #38bdf8; border-color: rgba(56, 189, 248, 0.55);
+      background: rgba(56, 189, 248, 0.25); color: #38bdf8; border-color: rgba(56, 189, 248, 0.6);
     }
 
     /* 중앙 가이드 스캔 프레임 */
@@ -42,7 +42,7 @@
     /* 범례 배지 */
     #legend {
       position: fixed; bottom: 82px; left: 16px; right: 16px; z-index: 20;
-      display: flex; justify-content: center; gap: 16px;
+      display: flex; justify-content: center; gap: 14px;
       font-size: 11px; color: #e2e8f0; text-shadow: 0 1px 3px rgba(0,0,0,0.85);
       pointer-events: none;
     }
@@ -97,7 +97,7 @@
   <div id="ar-container"></div>
 
   <div id="legend">
-    <span><i class="dot" style="background:#ef4444;"></i>민감정보 프롬프트 (SG-Gate 차단)</span>
+    <span><i class="dot" style="background:#ef4444;"></i>민감정보 프롬프트 (차단)</span>
     <span><i class="dot" style="background:#10b981;"></i>정제 데이터 (안전 통과)</span>
   </div>
 
@@ -116,8 +116,8 @@
       imageTargetSrc: './targets.mind',
       filterMinCF: 0.0001,
       filterBeta: 0.001,
-      missTolerance: 10,
-      warmupTolerance: 3,
+      missTolerance: 8,
+      warmupTolerance: 2,
       uiScanning: 'no',
       uiLoading: 'no'
     });
@@ -125,7 +125,7 @@
     const { renderer, scene, camera } = mindarThree;
 
     // 3D 조명 세팅
-    const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.3);
     scene.add(ambientLight);
 
     const keyLight = new THREE.DirectionalLight(0x7dd3fc, 2.8);
@@ -136,7 +136,6 @@
     rimLight.position.set(-2, -2, 2);
     scene.add(rimLight);
 
-    // 원본 트래킹 앵커 및 상태 변수
     const anchor = mindarThree.addAnchor(0);
     const statusBadge = document.getElementById('status-badge');
     const scanGuide = document.getElementById('scan-guide');
@@ -146,49 +145,10 @@
     scene.add(smoothGroup);
 
     let isTargetVisible = false;
-    let hasEverDetected = false; // 한 번이라도 명함이 인식되었는지 기록
+    let hasEverDetected = false;
     let firstFound = true;
 
-    anchor.onTargetFound = () => {
-      isTargetVisible = true;
-      hasEverDetected = true;
-      smoothGroup.visible = true;
-
-      if (firstFound) {
-        anchor.group.updateMatrixWorld(true);
-        smoothGroup.position.setFromMatrixPosition(anchor.group.matrixWorld);
-        smoothGroup.quaternion.setFromRotationMatrix(anchor.group.matrixWorld);
-        smoothGroup.scale.setFromMatrixScale(anchor.group.matrixWorld);
-        firstFound = false;
-      }
-
-      statusBadge.textContent = '명함 AR 트래킹 중';
-      statusBadge.className = 'active';
-      scanGuide.style.display = 'none';
-    };
-
-    anchor.onTargetLost = () => {
-      isTargetVisible = false;
-      // 한 번이라도 인식된 적이 있으면 숨기지 않고 화면 고정 모드로 전환!
-      if (hasEverDetected) {
-        smoothGroup.visible = true;
-        statusBadge.textContent = '화면 고정 모드 (드래그 회전)';
-        statusBadge.className = 'pinned';
-      }
-    };
-
-    // '다시 스캔하기' 버튼: 화면 고정을 풀고 다시 명함 스캔 대기 상태로 리셋
-    document.getElementById('reset-btn').addEventListener('click', () => {
-      hasEverDetected = false;
-      isTargetVisible = false;
-      firstFound = true;
-      smoothGroup.visible = false;
-      userYaw = 0;
-      userPitch = 0;
-      statusBadge.textContent = '명함을 비춰주세요';
-      statusBadge.className = '';
-      scanGuide.style.display = 'flex';
-    });
+    const lastValidPos = new THREE.Vector3(0, 0, -500);
 
     // 2. 3D 입체 방패(Shield) 오브젝트 생성
     function createShield3D() {
@@ -258,7 +218,7 @@
       canvas.height = 96;
       const ctx = canvas.getContext('2d');
 
-      ctx.fillStyle = 'rgba(10, 18, 34, 0.88)';
+      ctx.fillStyle = 'rgba(10, 18, 34, 0.9)';
       ctx.beginPath();
       ctx.roundRect(8, 8, 496, 80, 40);
       ctx.fill();
@@ -279,9 +239,10 @@
       );
     }
 
-    // 3. 3D 씬 조립
+    // 3. 핵심 데모 그룹(rootGroup) 조립 (내부 기준 높이 약 1.35 유닛)
     const rootGroup = new THREE.Group();
-    rootGroup.scale.set(2.8, 2.8, 2.8);
+    const BASE_AR_SCALE = 2.6;
+    rootGroup.scale.set(BASE_AR_SCALE, BASE_AR_SCALE, BASE_AR_SCALE);
     smoothGroup.add(rootGroup);
 
     const { shieldGroup, haloRing } = createShield3D();
@@ -330,7 +291,48 @@
       packets.push(mesh);
     }
 
-    // 5. 터치 드래그로 3D 방패 자유 회전 인터랙션 (화면 고정 모드 시 유용)
+    // 5. 타겟 인식 / 이탈 이벤트 핸들러
+    anchor.onTargetFound = () => {
+      isTargetVisible = true;
+      hasEverDetected = true;
+      smoothGroup.visible = true;
+
+      if (firstFound) {
+        anchor.group.updateMatrixWorld(true);
+        smoothGroup.position.setFromMatrixPosition(anchor.group.matrixWorld);
+        smoothGroup.quaternion.setFromRotationMatrix(anchor.group.matrixWorld);
+        smoothGroup.scale.setFromMatrixScale(anchor.group.matrixWorld);
+        lastValidPos.copy(smoothGroup.position);
+        firstFound = false;
+      }
+
+      statusBadge.textContent = '명함 AR 트래킹 중';
+      statusBadge.className = 'active';
+      scanGuide.style.display = 'none';
+    };
+
+    anchor.onTargetLost = () => {
+      isTargetVisible = false;
+      if (hasEverDetected) {
+        smoothGroup.visible = true;
+        statusBadge.textContent = '화면 고정 모드 (드래그 회전)';
+        statusBadge.className = 'pinned';
+      }
+    };
+
+    document.getElementById('reset-btn').addEventListener('click', () => {
+      hasEverDetected = false;
+      isTargetVisible = false;
+      firstFound = true;
+      smoothGroup.visible = false;
+      userYaw = 0;
+      userPitch = 0;
+      statusBadge.textContent = '명함을 비춰주세요';
+      statusBadge.className = '';
+      scanGuide.style.display = 'flex';
+    });
+
+    // 6. 터치 드래그 자유 회전
     let isDragging = false;
     let prevTouchX = 0;
     let prevTouchY = 0;
@@ -358,17 +360,33 @@
 
     window.addEventListener('touchend', () => { isDragging = false; });
 
-    // 보간용 목표 좌표 (명함 인식 시: 앵커 좌표 / 명함 이탈 시: 카메라 정면 중앙 좌표)
+    // 7. 스마트폰 화면 크기에 딱 맞는 최적 스케일 자동 계산 함수
+    function computeMobileFitScale(depthZ) {
+      const distance = Math.abs(depthZ);
+      // 카메라 투영 행렬에서 수직 시야각(FOV) 추출
+      const fovRad = 2 * Math.atan(1 / camera.projectionMatrix.elements[5]);
+      const visibleHeight = 2 * distance * Math.tan(fovRad / 2);
+      const visibleWidth = visibleHeight * (window.innerWidth / window.innerHeight);
+
+      // rootGroup의 실제 로컬 크기 (가로 약 0.92 * 2.6, 세로 약 1.32 * 2.6)
+      const objectHeight = 1.32 * BASE_AR_SCALE;
+      const objectWidth = 0.95 * BASE_AR_SCALE;
+
+      // 상단/하단 HUD를 제외한 스마트폰 화면 높이의 56%, 가로 폭의 78% 이내로 맞춤
+      const scaleByH = (visibleHeight * 0.56) / objectHeight;
+      const scaleByW = (visibleWidth * 0.78) / objectWidth;
+      return Math.min(scaleByH, scaleByW);
+    }
+
     const targetPos = new THREE.Vector3();
     const targetQuat = new THREE.Quaternion();
     const targetScale = new THREE.Vector3();
-
-    const pinnedPos = new THREE.Vector3();
+    const pinnedCenterPos = new THREE.Vector3();
     const pinnedQuat = new THREE.Quaternion();
     const pinnedEuler = new THREE.Euler();
-    const pinnedScale = new THREE.Vector3(140, 140, 140); // 카메라 정면 거리(z=-650)에 맞춘 선명한 크기
+    const fitScaleVec = new THREE.Vector3();
 
-    // 6. 렌더링 루프
+    // 8. 애니메이션 및 렌더링 루프
     const clock = new THREE.Clock();
     const start = async () => {
       await mindarThree.start();
@@ -376,10 +394,10 @@
         const delta = clock.getDelta();
 
         if (hasEverDetected) {
-          const smoothFactor = Math.min(1, delta * 7.5);
+          const smoothFactor = Math.min(1, delta * 8.0);
 
           if (isTargetVisible) {
-            // [모드 A] 명함이 보일 때: 명함 표면에 밀착 추종
+            // [모드 A] 명함 트래킹 중
             anchor.group.updateMatrixWorld(true);
             targetPos.setFromMatrixPosition(anchor.group.matrixWorld);
             targetQuat.setFromRotationMatrix(anchor.group.matrixWorld);
@@ -388,17 +406,19 @@
             smoothGroup.position.lerp(targetPos, smoothFactor);
             smoothGroup.quaternion.slerp(targetQuat, smoothFactor);
             smoothGroup.scale.lerp(targetScale, smoothFactor);
-          } else {
-            // [모드 B] 명함이 안 보일 때: 카메라 정중앙 앞에 고정되어 계속 표시 + 터치 회전 반영
-            pinnedPos.set(0, 15, -650).applyMatrix4(camera.matrixWorld);
-            pinnedEuler.set(userPitch, userYaw, 0, 'YXZ');
-            pinnedQuat.setFromQuaternion(camera.quaternion).multiply(
-              new THREE.Quaternion().setFromEuler(pinnedEuler)
-            );
 
-            smoothGroup.position.lerp(pinnedPos, smoothFactor);
+            lastValidPos.copy(smoothGroup.position);
+          } else {
+            // [모드 B] 스마트폰 화면 사이즈에 맞춰 정중앙 정렬
+            const s = computeMobileFitScale(lastValidPos.z);
+            fitScaleVec.set(s, s, s);
+            pinnedCenterPos.set(0, 0, lastValidPos.z);
+            pinnedEuler.set(userPitch, userYaw, 0, 'YXZ');
+            pinnedQuat.setFromEuler(pinnedEuler);
+
+            smoothGroup.position.lerp(pinnedCenterPos, smoothFactor);
             smoothGroup.quaternion.slerp(pinnedQuat, smoothFactor);
-            smoothGroup.scale.lerp(pinnedScale, smoothFactor);
+            smoothGroup.scale.lerp(fitScaleVec, smoothFactor);
           }
         }
 
