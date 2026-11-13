@@ -117,7 +117,7 @@
       filterMinCF: 0.0001,
       filterBeta: 0.001,
       missTolerance: 8,
-      warmupTolerance: 2,
+      warmupTolerance: 4, // 초기 불안정 프레임 건너뜀
       uiScanning: 'no',
       uiLoading: 'no'
     });
@@ -148,7 +148,8 @@
     let hasEverDetected = false;
     let firstFound = true;
 
-    const lastValidPos = new THREE.Vector3(0, 0, -500);
+    // 화면 고정 모드 전용 고정 깊이 (카메라 클리핑 방지 및 일관된 크기 보장)
+    const PINNED_DEPTH_Z = -600;
 
     // 2. 3D 입체 방패(Shield) 오브젝트 생성
     function createShield3D() {
@@ -239,7 +240,7 @@
       );
     }
 
-    // 3. 핵심 데모 그룹(rootGroup) 조립 (내부 기준 높이 약 1.35 유닛)
+    // 3. 핵심 데모 그룹(rootGroup) 조립
     const rootGroup = new THREE.Group();
     const BASE_AR_SCALE = 2.6;
     rootGroup.scale.set(BASE_AR_SCALE, BASE_AR_SCALE, BASE_AR_SCALE);
@@ -291,7 +292,32 @@
       packets.push(mesh);
     }
 
-    // 5. 타겟 인식 / 이탈 이벤트 핸들러
+    // 5. 스마트폰 화면 크기에 딱 맞는 최적 스케일 자동 계산
+    function computeMobileFitScale(depthZ) {
+      const distance = Math.abs(depthZ);
+      const projM5 = camera.projectionMatrix.elements[5];
+      // 카메라 투영 행렬 초기화 전 폴백 방지
+      const fovRad = projM5 > 0 ? 2 * Math.atan(1 / projM5) : THREE.MathUtils.degToRad(45);
+      const visibleHeight = 2 * distance * Math.tan(fovRad / 2);
+      const visibleWidth = visibleHeight * (window.innerWidth / window.innerHeight);
+
+      const objectHeight = 1.32 * BASE_AR_SCALE;
+      const objectWidth = 0.95 * BASE_AR_SCALE;
+
+      const scaleByH = (visibleHeight * 0.56) / objectHeight;
+      const scaleByW = (visibleWidth * 0.78) / objectWidth;
+      return Math.min(scaleByH, scaleByW);
+    }
+
+    // 즉시 화면 정중앙에 최적 크기로 스냅 정렬하는 헬퍼 함수
+    function snapToMobileCenter() {
+      const s = computeMobileFitScale(PINNED_DEPTH_Z);
+      smoothGroup.position.set(0, 0, PINNED_DEPTH_Z);
+      smoothGroup.scale.set(s, s, s);
+      smoothGroup.rotation.set(userPitch, userYaw, 0, 'YXZ');
+    }
+
+    // 6. 타겟 인식 / 이탈 이벤트 핸들러
     anchor.onTargetFound = () => {
       isTargetVisible = true;
       hasEverDetected = true;
@@ -299,10 +325,15 @@
 
       if (firstFound) {
         anchor.group.updateMatrixWorld(true);
-        smoothGroup.position.setFromMatrixPosition(anchor.group.matrixWorld);
-        smoothGroup.quaternion.setFromRotationMatrix(anchor.group.matrixWorld);
-        smoothGroup.scale.setFromMatrixScale(anchor.group.matrixWorld);
-        lastValidPos.copy(smoothGroup.position);
+        const initPos = new THREE.Vector3().setFromMatrixPosition(anchor.group.matrixWorld);
+        // 초기 프레임 거리값이 비정상적으로 가깝거나 0이면 안전 위치로 시작
+        if (Math.abs(initPos.z) > 80) {
+          smoothGroup.position.copy(initPos);
+          smoothGroup.quaternion.setFromRotationMatrix(anchor.group.matrixWorld);
+          smoothGroup.scale.setFromMatrixScale(anchor.group.matrixWorld);
+        } else {
+          snapToMobileCenter();
+        }
         firstFound = false;
       }
 
@@ -315,6 +346,8 @@
       isTargetVisible = false;
       if (hasEverDetected) {
         smoothGroup.visible = true;
+        // 명함이 사라지는 즉시 거대 확대 현상 없이 모바일 정중앙 크기로 스냅 고정!
+        snapToMobileCenter();
         statusBadge.textContent = '화면 고정 모드 (드래그 회전)';
         statusBadge.className = 'pinned';
       }
@@ -332,7 +365,7 @@
       scanGuide.style.display = 'flex';
     });
 
-    // 6. 터치 드래그 자유 회전
+    // 7. 터치 드래그 자유 회전
     let isDragging = false;
     let prevTouchX = 0;
     let prevTouchY = 0;
@@ -360,24 +393,6 @@
 
     window.addEventListener('touchend', () => { isDragging = false; });
 
-    // 7. 스마트폰 화면 크기에 딱 맞는 최적 스케일 자동 계산 함수
-    function computeMobileFitScale(depthZ) {
-      const distance = Math.abs(depthZ);
-      // 카메라 투영 행렬에서 수직 시야각(FOV) 추출
-      const fovRad = 2 * Math.atan(1 / camera.projectionMatrix.elements[5]);
-      const visibleHeight = 2 * distance * Math.tan(fovRad / 2);
-      const visibleWidth = visibleHeight * (window.innerWidth / window.innerHeight);
-
-      // rootGroup의 실제 로컬 크기 (가로 약 0.92 * 2.6, 세로 약 1.32 * 2.6)
-      const objectHeight = 1.32 * BASE_AR_SCALE;
-      const objectWidth = 0.95 * BASE_AR_SCALE;
-
-      // 상단/하단 HUD를 제외한 스마트폰 화면 높이의 56%, 가로 폭의 78% 이내로 맞춤
-      const scaleByH = (visibleHeight * 0.56) / objectHeight;
-      const scaleByW = (visibleWidth * 0.78) / objectWidth;
-      return Math.min(scaleByH, scaleByW);
-    }
-
     const targetPos = new THREE.Vector3();
     const targetQuat = new THREE.Quaternion();
     const targetScale = new THREE.Vector3();
@@ -397,22 +412,29 @@
           const smoothFactor = Math.min(1, delta * 8.0);
 
           if (isTargetVisible) {
-            // [모드 A] 명함 트래킹 중
+            // [모드 A] 명함 트래킹 중 (유효 거리 필터링 적용)
             anchor.group.updateMatrixWorld(true);
             targetPos.setFromMatrixPosition(anchor.group.matrixWorld);
-            targetQuat.setFromRotationMatrix(anchor.group.matrixWorld);
-            targetScale.setFromMatrixScale(anchor.group.matrixWorld);
 
-            smoothGroup.position.lerp(targetPos, smoothFactor);
-            smoothGroup.quaternion.slerp(targetQuat, smoothFactor);
-            smoothGroup.scale.lerp(targetScale, smoothFactor);
+            if (Math.abs(targetPos.z) > 80) {
+              targetQuat.setFromRotationMatrix(anchor.group.matrixWorld);
+              targetScale.setFromMatrixScale(anchor.group.matrixWorld);
 
-            lastValidPos.copy(smoothGroup.position);
+              // 명함 트래킹 시에도 화면을 넘치지 않도록 최대 스케일 상한 제한
+              const maxAllowedScale = computeMobileFitScale(targetPos.z) * 1.1;
+              if (targetScale.x > maxAllowedScale) {
+                targetScale.setScalar(maxAllowedScale);
+              }
+
+              smoothGroup.position.lerp(targetPos, smoothFactor);
+              smoothGroup.quaternion.slerp(targetQuat, smoothFactor);
+              smoothGroup.scale.lerp(targetScale, smoothFactor);
+            }
           } else {
-            // [모드 B] 스마트폰 화면 사이즈에 맞춰 정중앙 정렬
-            const s = computeMobileFitScale(lastValidPos.z);
+            // [모드 B] 화면 고정 모드: 고정 깊이(-600) 기준 모바일 정중앙 유지
+            const s = computeMobileFitScale(PINNED_DEPTH_Z);
             fitScaleVec.set(s, s, s);
-            pinnedCenterPos.set(0, 0, lastValidPos.z);
+            pinnedCenterPos.set(0, 0, PINNED_DEPTH_Z);
             pinnedEuler.set(userPitch, userYaw, 0, 'YXZ');
             pinnedQuat.setFromEuler(pinnedEuler);
 
